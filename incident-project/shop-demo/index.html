@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mini Shop Demo</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='14' fill='%230f172a'/%3E%3Ctext x='50' y='64' font-family='monospace' font-size='40' font-weight='700' text-anchor='middle' fill='white'%3EMS%3C/text%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">MS</span>
+      <span class="brand-name">Mini Shop</span>
+    </div>
+    <div class="topbar-right">
+      <span class="connected"><span class="dot"></span> Connected to Incident Assistant</span>
+      <a id="dashboard-link" class="ghost-link" href="#" target="_blank" rel="noopener">Incident dashboard ↗</a>
+    </div>
+  </header>
+
+  <section class="hero">
+    <div class="hero-copy">
+      <span class="eyebrow">Demo storefront</span>
+      <h1>Everything for your workspace</h1>
+      <p>Shop as usual. Turn on <strong>Simulate checkout failure</strong> and check out to send a live HTTP 500 alert into the incident pipeline.</p>
+    </div>
+  </section>
+
+  <main class="layout">
+    <section class="catalog">
+      <div class="section-head">
+        <h2>Products</h2>
+        <span id="product-count" class="pill"></span>
+      </div>
+      <div id="product-list" class="product-grid"></div>
+
+      <section id="updates" class="updates hidden" aria-live="polite">
+        <div class="section-head">
+          <h2>Incident updates</h2>
+          <span class="pill">Live</span>
+        </div>
+        <p class="muted updates-intro">Checkout problems you report appear here. We post the fix as soon as it is resolved.</p>
+        <div id="updates-list" class="updates-list"></div>
+      </section>
+    </section>
+
+    <aside class="cart-panel">
+      <div class="section-head">
+        <h2>Your cart</h2>
+        <span id="cart-count" class="pill">0 items</span>
+      </div>
+
+      <div id="cart-items" class="cart-items"></div>
+
+      <div class="cart-total">
+        <span>Total</span>
+        <strong id="cart-total">₹0</strong>
+      </div>
+
+      <label class="switch-row">
+        <input type="checkbox" id="fail-toggle" />
+        <span class="switch" aria-hidden="true"></span>
+        <span class="switch-text">
+          <strong>Simulate checkout failure</strong>
+          <small>Sends an HTTP 500 alert to the incident assistant</small>
+        </span>
+      </label>
+
+      <button id="checkout-btn" class="checkout">Checkout</button>
+      <div id="status" class="status hidden" role="status"></div>
+    </aside>
+  </main>
+
+  <footer class="footer">Mini Shop · demo storefront for the Incident Response Assistant</footer>
+
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

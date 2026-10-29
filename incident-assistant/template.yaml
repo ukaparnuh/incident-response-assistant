@@ -1,0 +1,222 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Incident Response Assistant (rule-based analysis, no AI model)
+
+Parameters:
+  AlertEmail:
+    Type: String
+    Description: Email that receives High/Critical incident notifications
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Timeout: 30
+    MemorySize: 256
+    Environment:
+      Variables:
+        TABLE_NAME: !Ref IncidentsTable
+        TOPIC_ARN: !Ref NotifyTopic
+        QUEUE_URL: !Ref AlertQueue
+
+Resources:
+  # ---------- Storage ----------
+  IncidentsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: incident_id
+          AttributeType: S
+        - AttributeName: fingerprint
+          AttributeType: S
+        - AttributeName: created_at
+          AttributeType: S
+      KeySchema:
+        - AttributeName: incident_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: fingerprint-index
+          KeySchema:
+            - AttributeName: fingerprint
+              KeyType: HASH
+            - AttributeName: created_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      SSESpecification:
+        SSEEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+
+  # ---------- Messaging ----------
+  AlertDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      MessageRetentionPeriod: 1209600
+      SqsManagedSseEnabled: true
+
+  AlertQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      VisibilityTimeout: 180
+      SqsManagedSseEnabled: true
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt AlertDLQ.Arn
+        maxReceiveCount: 3
+
+  NotifyTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      Subscription:
+        - Protocol: email
+          Endpoint: !Ref AlertEmail
+
+  # ---------- API ----------
+  IncidentApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: prod
+      Cors:
+           AllowMethods: "'GET,POST,PATCH,OPTIONS'"
+           AllowHeaders: "'Content-Type,x-api-key'"
+           AllowOrigin: "'*'"
+      # API Gateway's own 403/401/5xx replies (e.g. wrong API key) carry no CORS
+      # headers by default, so browsers report them as CORS errors instead.
+      GatewayResponses:
+        DEFAULT_4XX:
+          ResponseParameters:
+            Headers:
+              Access-Control-Allow-Origin: "'*'"
+              Access-Control-Allow-Headers: "'Content-Type,x-api-key'"
+        DEFAULT_5XX:
+          ResponseParameters:
+            Headers:
+              Access-Control-Allow-Origin: "'*'"
+              Access-Control-Allow-Headers: "'Content-Type,x-api-key'"
+      Auth:
+        ApiKeyRequired: true
+        AddApiKeyRequiredToCorsPreflight: false
+        UsagePlan:
+          CreateUsagePlan: PER_API
+          UsagePlanName: IncidentApiPlan
+          Throttle:
+            RateLimit: 10
+            BurstLimit: 20
+
+  # ---------- Functions ----------
+  IngestFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/ingest/
+      Handler: app.handler
+      Timeout: 10
+      Policies:
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt AlertQueue.QueueName
+      Events:
+        Webhook:
+          Type: Api
+          Properties:
+            RestApiId: !Ref IncidentApi
+            Path: /alerts
+            Method: post
+        CloudWatchAlarm:
+          Type: EventBridgeRule
+          Properties:
+            Pattern:
+              source:
+                - aws.cloudwatch
+              detail-type:
+                - CloudWatch Alarm State Change
+              detail:
+                state:
+                  value:
+                    - ALARM
+
+  AnalyzeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/analyze/
+      Handler: app.handler
+      Timeout: 30
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref IncidentsTable
+        - SNSPublishMessagePolicy:
+            TopicName: !GetAtt NotifyTopic.TopicName
+      Events:
+        FromQueue:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt AlertQueue.Arn
+            BatchSize: 5
+            FunctionResponseTypes:
+              - ReportBatchItemFailures
+
+  QueryFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/api/
+      Handler: app.handler
+      Timeout: 15
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref IncidentsTable
+      Events:
+        List:
+          Type: Api
+          Properties:
+            RestApiId: !Ref IncidentApi
+            Path: /incidents
+            Method: get
+        Patterns:
+          Type: Api
+          Properties:
+            RestApiId: !Ref IncidentApi
+            Path: /patterns
+            Method: get
+        UpdateStatus:
+          Type: Api
+          Properties:
+            RestApiId: !Ref IncidentApi
+            Path: /incidents/{incident_id}
+            Method: patch
+        # Public, customer-facing view. Returns only safe fields and needs no API key;
+        # the incident ID (a random UUID) acts as the capability to read it.
+        PublicStatus:
+          Type: Api
+          Properties:
+            RestApiId: !Ref IncidentApi
+            Path: /status/{incident_id}
+            Method: get
+            Auth:
+              ApiKeyRequired: false
+
+
+  # ---------- Monitoring ----------
+  DLQAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Messages are stuck in the dead letter queue
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt AlertDLQ.QueueName
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      AlarmActions:
+        - !Ref NotifyTopic
+
+Outputs:
+  WebhookUrl:
+    Value: !Sub https://${IncidentApi}.execute-api.${AWS::Region}.amazonaws.com/prod/alerts
+  IncidentsUrl:
+    Value: !Sub https://${IncidentApi}.execute-api.${AWS::Region}.amazonaws.com/prod/incidents
+  PatternsUrl:
+    Value: !Sub https://${IncidentApi}.execute-api.${AWS::Region}.amazonaws.com/prod/patterns
+  TableName:
+    Value: !Ref IncidentsTable

@@ -1,0 +1,13 @@
+version = 0.1
+
+[default.deploy.parameters]
+stack_name = "incident-assistant"
+resolve_s3 = true
+s3_prefix = "incident-assistant"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = "AlertEmail=\"you@example.com\""
+image_repositories = []
+
+[default.global.parameters]
+region = "ap-south-1"

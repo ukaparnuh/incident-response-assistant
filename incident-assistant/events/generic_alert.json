@@ -1,0 +1,7 @@
+{
+  "source": "grafana",
+  "title": "Checkout API 5xx error rate above 15%",
+  "description": "Error rate on checkout-service rose from 0.5% to 15% in 10 minutes after the 14:02 deployment. Timeouts to payments-db observed.",
+  "service": "checkout-service",
+  "severity_hint": ""
+}
